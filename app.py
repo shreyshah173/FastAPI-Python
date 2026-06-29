@@ -1,6 +1,8 @@
 from typing import List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from database import items_collection
+from bson import ObjectId
 
 app = FastAPI(
     title="Basic FastAPI CRUD",
@@ -9,9 +11,18 @@ app = FastAPI(
 )
 
 
+def serialize_item(item):
+    return {
+        "id": str(item["_id"]),
+        "name": item["name"],
+        "description": item["description"],
+        "price": item["price"]
+    }
+
 # -----------------------------
 # Model
 # -----------------------------
+
 
 class Item(BaseModel):
     name: str
@@ -21,28 +32,6 @@ class Item(BaseModel):
 
 class ItemResponse(Item):
     id: int
-
-
-# -----------------------------
-# Fake Database
-# -----------------------------
-
-db = [
-    {
-        "id": 1,
-        "name": "Laptop",
-        "description": "Gaming Laptop",
-        "price": 999.99,
-    },
-    {
-        "id": 2,
-        "name": "Mouse",
-        "description": "Wireless Mouse",
-        "price": 25.50,
-    },
-]
-
-next_id = 3
 
 
 # -----------------------------
@@ -60,43 +49,46 @@ def home():
 # Read All
 # -----------------------------
 
-@app.get("/items", response_model=List[ItemResponse])
+@app.get("/items")
 def get_items():
-    return db
+    items = items_collection.find()
+
+    return [
+        serialize_item(item)
+        for item in items
+    ]
 
 
 # -----------------------------
 # Read One
 # -----------------------------
 
-@app.get("/items/{item_id}", response_model=ItemResponse)
-def get_item(item_id: int):
+@app.get("/items/{item_id}")
+def get_item(item_id: str):
 
-    for item in db:
-        if item["id"] == item_id:
-            return item
+    item = items_collection.find_one(
+        {"_id": ObjectId(item_id)}
+    )
 
-    raise HTTPException(status_code=404, detail="Item not found")
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    return serialize_item(item)
 
 
 # -----------------------------
 # Create
 # -----------------------------
 
-@app.post("/items", response_model=ItemResponse, status_code=201)
+@app.post("/items")
 def create_item(item: Item):
+    result = items_collection.insert_one(item.model_dump())
 
-    global next_id
+    new_item = items_collection.find_one(
+        {"_id": result.inserted_id}
+    )
 
-    new_item = {
-        "id": next_id,
-        **item.model_dump()
-    }
-
-    db.append(new_item)
-    next_id += 1
-
-    return new_item
+    return serialize_item(new_item)
 
 
 # -----------------------------
@@ -104,19 +96,24 @@ def create_item(item: Item):
 # -----------------------------
 
 @app.put("/items/{item_id}", response_model=ItemResponse)
-def update_item(item_id: int, updated: Item):
+def update_item(item_id: str, updated: Item):
+    result = items_collection.find_one(
+        {"_id": ObjectId(item_id)},
+        {
+            "$set": updated.model_dump()
+        }
+    )
 
-    for item in db:
+    if result.matched_count == 0:
+        raise HTTPException(
+            status_code=404, detail="Item not found"
+        )
 
-        if item["id"] == item_id:
+    item = items_collection.find_one({
+        "_id": ObjectId(item_id)
+    })
 
-            item["name"] = updated.name
-            item["description"] = updated.description
-            item["price"] = updated.price
-
-            return item
-
-    raise HTTPException(status_code=404, detail="Item not found")
+    return item
 
 
 # -----------------------------
@@ -124,15 +121,13 @@ def update_item(item_id: int, updated: Item):
 # -----------------------------
 
 @app.delete("/items/{item_id}")
-def delete_item(item_id: int):
+def delete_item(item_id: str):
 
-    for index, item in enumerate(db):
+    result = items_collection.delete_one({
+        "_id": ObjectId(item_id)
+    })
 
-        if item["id"] == item_id:
-            db.pop(index)
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
 
-            return {
-                "message": "Item deleted successfully"
-            }
-
-    raise HTTPException(status_code=404, detail="Item not found")
+    return {"message": "deleted successfully"}
