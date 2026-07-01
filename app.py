@@ -3,12 +3,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from database import items_collection
 from bson import ObjectId
+from routes.auth import router as auth_router
 
-app = FastAPI(
-    title="Basic FastAPI CRUD",
-    version="1.0.0",
-    description="Simple CRUD example for deployment on Render"
-)
+
+app = FastAPI()
+
+app.include_router(auth_router)
 
 
 def serialize_item(item):
